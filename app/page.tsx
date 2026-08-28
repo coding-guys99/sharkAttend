@@ -15,6 +15,11 @@ const formatter = new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", ho
 const dateFormatter = new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" });
 const shortDateFormatter = new Intl.DateTimeFormat("zh-TW", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" });
 function formatTime(value: string | null) { return value ? formatter.format(new Date(value)) : "--:--"; }
+function taipeiDateKey() {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Taipei", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -32,18 +37,28 @@ export default function Home() {
     const { data: authData } = await supabase.auth.getUser();
     const uid = authData.user?.id;
     if (!uid) return;
-    const [{ data: profileData }, { data: attendanceData }, { data: announcementData }, { data: allProfiles }, { data: allAttendance }] = await Promise.all([
+
+    const [{ data: profileData }, { data: attendanceData }, { data: announcementData }] = await Promise.all([
       supabase.from("profiles").select("user_id,employee_no,name,role").eq("user_id", uid).maybeSingle(),
-      supabase.from("attendance_records").select("user_id,work_date,clock_in,clock_out").eq("user_id", uid).order("work_date", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("attendance_records").select("user_id,work_date,clock_in,clock_out").eq("user_id", uid).eq("work_date", taipeiDateKey()).maybeSingle(),
       supabase.from("announcements").select("id,title,body,published_at").order("published_at", { ascending: false }),
-      supabase.from("profiles").select("user_id,employee_no,name").order("employee_no"),
-      supabase.from("attendance_records").select("user_id,work_date,clock_in,clock_out").order("work_date", { ascending: false }).order("clock_in", { ascending: false }).limit(200),
     ]);
+
     setProfile(profileData ?? null);
     setAttendance(attendanceData ?? null);
     setAnnouncements(announcementData ?? []);
-    const people = new Map((allProfiles ?? []).map((p) => [p.user_id, p]));
-    setRecords((allAttendance ?? []).map((r) => ({ ...r, employee_no: people.get(r.user_id)?.employee_no ?? "—", name: people.get(r.user_id)?.name ?? "未知" })));
+
+    if (profileData?.role === "admin") {
+      const [{ data: allProfiles }, { data: allAttendance }] = await Promise.all([
+        supabase.from("profiles").select("user_id,employee_no,name").order("employee_no"),
+        supabase.from("attendance_records").select("user_id,work_date,clock_in,clock_out").order("work_date", { ascending: false }).order("clock_in", { ascending: false }).limit(200),
+      ]);
+      const people = new Map((allProfiles ?? []).map((p) => [p.user_id, p]));
+      setRecords((allAttendance ?? []).map((r) => ({ ...r, employee_no: people.get(r.user_id)?.employee_no ?? "—", name: people.get(r.user_id)?.name ?? "未知" })));
+    } else {
+      setRecords([]);
+      setTab((current) => current === "records" || current === "admin" ? "attendance" : current);
+    }
   }, []);
 
   useEffect(() => {
@@ -65,12 +80,18 @@ export default function Home() {
     <header className="topbar"><div className="brand-wrap"><div className="logo-slot">S</div><div><div className="brand">sharkAttend</div><div className="hello">嗨，{profile?.name ?? "Team"}{isAdmin ? " · 管理員" : ""}</div></div></div><div className="date-pill">{todayLabel}</div></header>
     <section className="content">
       {tab === "attendance" && <div className="attendance-page"><div className="intro"><span className="eyebrow">TODAY</span><h1>今天也別忘了打卡</h1><p>員工編號 {profile?.employee_no ?? "—"}</p></div><div className="clock-grid"><button className="clock-circle clock-in" onClick={() => clock("in")} disabled={Boolean(attendance?.clock_in) || actionLoading !== null}><span className="clock-label">上班</span><strong>{actionLoading === "in" ? "..." : formatTime(attendance?.clock_in ?? null)}</strong><small>{attendance?.clock_in ? "已打卡" : "點一下打卡"}</small></button><button className="clock-circle clock-out" onClick={() => clock("out")} disabled={!attendance?.clock_in || Boolean(attendance?.clock_out) || actionLoading !== null}><span className="clock-label">下班</span><strong>{actionLoading === "out" ? "..." : formatTime(attendance?.clock_out ?? null)}</strong><small>{attendance?.clock_out ? "已打卡" : attendance?.clock_in ? "點一下打卡" : "上班後可使用"}</small></button></div>{message && <div className="toast-inline">{message}</div>}</div>}
-      {tab === "records" && <div className="list-page"><div className="section-title"><span className="eyebrow">RECORDS</span><h1>打卡紀錄</h1><p>所有員工都可以查看全員打卡紀錄。</p></div><div className="record-list">{records.map((r, i) => <article className="record-card" key={`${r.user_id}-${r.work_date}-${i}`}><div className="record-head"><div><strong>{r.name}</strong><span>#{r.employee_no}</span></div><time>{shortDateFormatter.format(new Date(`${r.work_date}T12:00:00+08:00`))}</time></div><div className="record-times"><div><small>上班</small><b>{formatTime(r.clock_in)}</b></div><div><small>下班</small><b>{formatTime(r.clock_out)}</b></div></div></article>)}{!records.length && <div className="empty-card">目前沒有打卡紀錄</div>}</div></div>}
+      {tab === "records" && isAdmin && <div className="list-page"><div className="section-title"><span className="eyebrow">RECORDS</span><h1>打卡紀錄</h1><p>僅管理員可查看全員打卡紀錄。</p></div><div className="record-list">{records.map((r, i) => <article className="record-card" key={`${r.user_id}-${r.work_date}-${i}`}><div className="record-head"><div><strong>{r.name}</strong><span>#{r.employee_no}</span></div><time>{shortDateFormatter.format(new Date(`${r.work_date}T12:00:00+08:00`))}</time></div><div className="record-times"><div><small>上班</small><b>{formatTime(r.clock_in)}</b></div><div><small>下班</small><b>{formatTime(r.clock_out)}</b></div></div></article>)}{!records.length && <div className="empty-card">目前沒有打卡紀錄</div>}</div></div>}
       {tab === "announcements" && <div className="list-page"><div className="section-title"><span className="eyebrow">NEWS</span><h1>公告</h1></div><div className="announcement-list">{announcements.map((item) => <article className="announcement-card" key={item.id}><time>{shortDateFormatter.format(new Date(item.published_at))}</time><h2>{item.title}</h2><p>{item.body}</p></article>)}{!announcements.length && <div className="empty-card">目前沒有公告</div>}</div></div>}
-      {tab === "profile" && <ProfilePage profile={profile} isAdmin={isAdmin} onLogout={async () => { await supabase?.auth.signOut(); setUser(null); setProfile(null); setAttendance(null); setTab("attendance"); }} />}
+      {tab === "profile" && <ProfilePage profile={profile} isAdmin={isAdmin} onLogout={async () => { await supabase?.auth.signOut(); setUser(null); setProfile(null); setAttendance(null); setRecords([]); setTab("attendance"); }} />}
       {tab === "admin" && isAdmin && <AdminPanel />}
     </section>
-    <nav className={isAdmin ? "bottom-nav five-nav" : "bottom-nav four-nav"}><NavButton active={tab === "attendance"} label="打卡" icon="◉" onClick={() => setTab("attendance")} /><NavButton active={tab === "records"} label="紀錄" icon="≡" onClick={() => setTab("records")} /><NavButton active={tab === "announcements"} label="公告" icon="▤" onClick={() => setTab("announcements")} /><NavButton active={tab === "profile"} label="我的" icon="●" onClick={() => setTab("profile")} />{isAdmin && <NavButton active={tab === "admin"} label="管理" icon="⌘" onClick={() => setTab("admin")} />}</nav>
+    <nav className={isAdmin ? "bottom-nav five-nav" : "bottom-nav three-nav"}>
+      <NavButton active={tab === "attendance"} label="打卡" icon="◉" onClick={() => setTab("attendance")} />
+      {isAdmin && <NavButton active={tab === "records"} label="紀錄" icon="≡" onClick={() => setTab("records")} />}
+      <NavButton active={tab === "announcements"} label="公告" icon="▤" onClick={() => setTab("announcements")} />
+      <NavButton active={tab === "profile"} label="我的" icon="●" onClick={() => setTab("profile")} />
+      {isAdmin && <NavButton active={tab === "admin"} label="管理" icon="⌘" onClick={() => setTab("admin")} />}
+    </nav>
   </main>;
 }
 
