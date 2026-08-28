@@ -8,10 +8,20 @@ type Employee={user_id:string;employee_no:string;name:string;role:"employee"|"ad
 const emptyPerms:Perms={can_manage_employees:false,can_manage_permissions:false,can_reset_passwords:false};
 function normalizePerms(v:Employee["employee_permissions"]):Perms{if(Array.isArray(v))return v[0]??emptyPerms;return v??emptyPerms}
 
+async function edgeErrorMessage(error: unknown){
+ const fallback=error instanceof Error?error.message:"Edge Function request failed";
+ const context=(error as {context?:unknown}|null)?.context as {clone?:()=>Response;json?:()=>Promise<unknown>}|undefined;
+ try{
+  const response=context?.clone?.();
+  const payload=(response?await response.json():context?.json?await context.json():null) as {error?:string}|null;
+  return payload?.error||fallback;
+ }catch{return fallback}
+}
+
 export default function AdminPanel(){
  const[employees,setEmployees]=useState<Employee[]>([]),[loading,setLoading]=useState(true),[message,setMessage]=useState(""),[newNo,setNewNo]=useState(""),[newName,setNewName]=useState(""),[newRole,setNewRole]=useState<"employee"|"admin">("employee"),[resetPasswords,setResetPasswords]=useState<Record<string,string>>({}),[busy,setBusy]=useState<string|null>(null);
- const invoke=useCallback(async(body:Record<string,unknown>)=>{if(!supabase)throw new Error("Supabase unavailable");const{data,error}=await supabase.functions.invoke("admin-employees",{body});if(error)throw new Error(error.message);if(data?.error)throw new Error(data.error);return data},[]);
- const load=useCallback(async()=>{try{const data=await invoke({action:"list"});setEmployees(data?.employees??[])}catch(e){setMessage(e instanceof Error?e.message:"讀取員工失敗")}finally{setLoading(false)}},[invoke]);
+ const invoke=useCallback(async(body:Record<string,unknown>)=>{if(!supabase)throw new Error("Supabase unavailable");const{data,error}=await supabase.functions.invoke("admin-employees",{body});if(error)throw new Error(await edgeErrorMessage(error));if(data?.error)throw new Error(data.error);return data},[]);
+ const load=useCallback(async()=>{setLoading(true);setMessage("");try{const data=await invoke({action:"list"});setEmployees(data?.employees??[])}catch(e){setMessage(e instanceof Error?e.message:"讀取員工失敗")}finally{setLoading(false)}},[invoke]);
  useEffect(()=>{load()},[load]);
  async function addEmployee(){if(!newNo.trim()||!newName.trim()){setMessage("請輸入員工編號與姓名");return}setBusy("create");setMessage("");try{await invoke({action:"create",employeeNo:newNo,name:newName,password:"123456",role:newRole});setMessage(`已新增 ${newNo} / ${newName}，預設密碼 123456`);setNewNo("");setNewName("");setNewRole("employee");await load()}catch(e){setMessage(e instanceof Error?e.message:"新增失敗")}setBusy(null)}
  async function savePermissions(emp:Employee,role:"employee"|"admin",permissions:Perms){setBusy(emp.user_id);setMessage("");try{await invoke({action:"update_permissions",userId:emp.user_id,role,permissions});setEmployees(p=>p.map(x=>x.user_id===emp.user_id?{...x,role,employee_permissions:permissions}:x));setMessage(`已更新 ${emp.name} 的權限`)}catch(e){setMessage(e instanceof Error?e.message:"更新失敗")}setBusy(null)}
