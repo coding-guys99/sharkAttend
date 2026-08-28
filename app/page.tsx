@@ -85,7 +85,7 @@ export default function Home() {
       {tab === "profile" && <ProfilePage profile={profile} isAdmin={isAdmin} onLogout={async () => { await supabase?.auth.signOut(); setUser(null); setProfile(null); setAttendance(null); setRecords([]); setTab("attendance"); }} />}
       {tab === "admin" && isAdmin && <AdminPanel />}
     </section>
-    <nav className={isAdmin ? "bottom-nav five-nav" : "bottom-nav three-nav"}>
+    <nav className="bottom-nav" style={{gridTemplateColumns:`repeat(${isAdmin ? 5 : 3}, minmax(0, 1fr))`}}>
       <NavButton active={tab === "attendance"} label="打卡" icon="◉" onClick={() => setTab("attendance")} />
       {isAdmin && <NavButton active={tab === "records"} label="紀錄" icon="≡" onClick={() => setTab("records")} />}
       <NavButton active={tab === "announcements"} label="公告" icon="▤" onClick={() => setTab("announcements")} />
