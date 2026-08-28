@@ -44,7 +44,6 @@ export default function Home() {
     setAnnouncements(announcementData ?? []);
     const people = new Map((allProfiles ?? []).map((p) => [p.user_id, p]));
     setRecords((allAttendance ?? []).map((r) => ({ ...r, employee_no: people.get(r.user_id)?.employee_no ?? "—", name: people.get(r.user_id)?.name ?? "未知" })));
-    if (profileData?.role === "admin") await supabase.functions.invoke("admin-employees", { body: { action: "initialize_defaults" } });
   }, []);
 
   useEffect(() => {
