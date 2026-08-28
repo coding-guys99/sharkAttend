@@ -2,12 +2,13 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import AdminPanel from "@/components/AdminPanel";
 import { employeeEmail, isSupabaseConfigured, supabase } from "@/lib/supabase";
 
-type Profile = { employee_no: string; name: string };
+type Profile = { employee_no: string; name: string; role: "employee" | "admin" };
 type Attendance = { work_date: string; clock_in: string | null; clock_out: string | null };
 type Announcement = { id: number; title: string; body: string; published_at: string };
-type Tab = "attendance" | "announcements" | "profile";
+type Tab = "attendance" | "announcements" | "profile" | "admin";
 
 const formatter = new Intl.DateTimeFormat("zh-TW", {
   timeZone: "Asia/Taipei",
@@ -41,7 +42,7 @@ export default function Home() {
   const loadData = useCallback(async () => {
     if (!supabase) return;
     const [{ data: profileData }, { data: attendanceData }, { data: announcementData }] = await Promise.all([
-      supabase.from("profiles").select("employee_no,name").maybeSingle(),
+      supabase.from("profiles").select("employee_no,name,role").maybeSingle(),
       supabase.from("attendance_records").select("work_date,clock_in,clock_out").order("work_date", { ascending: false }).limit(1).maybeSingle(),
       supabase.from("announcements").select("id,title,body,published_at").order("published_at", { ascending: false }),
     ]);
@@ -86,12 +87,14 @@ export default function Home() {
   if (!isSupabaseConfigured) return <SetupScreen />;
   if (!user) return <LoginScreen onLogin={async () => { if (supabase) { const { data } = await supabase.auth.getUser(); setUser(data.user); await loadData(); } }} />;
 
+  const isAdmin = profile?.role === "admin";
+
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="brand-wrap">
           <div className="logo-slot" aria-label="Logo placeholder">S</div>
-          <div><div className="brand">sharkAttend</div><div className="hello">嗨，{profile?.name ?? "Team"}</div></div>
+          <div><div className="brand">sharkAttend</div><div className="hello">嗨，{profile?.name ?? "Team"}{isAdmin ? " · 管理員" : ""}</div></div>
         </div>
         <div className="date-pill">{todayLabel}</div>
       </header>
@@ -123,16 +126,19 @@ export default function Home() {
 
         {tab === "profile" && (
           <div className="list-page"><div className="section-title"><span className="eyebrow">PROFILE</span><h1>我的</h1></div>
-            <div className="profile-card"><div className="avatar">{profile?.name?.slice(0,1) ?? "S"}</div><h2>{profile?.name}</h2><p>員工編號 {profile?.employee_no}</p></div>
-            <button className="logout" onClick={async () => { await supabase?.auth.signOut(); setUser(null); setProfile(null); setAttendance(null); }}>登出</button>
+            <div className="profile-card"><div className="avatar">{profile?.name?.slice(0,1) ?? "S"}</div><h2>{profile?.name}</h2><p>員工編號 {profile?.employee_no}</p>{isAdmin && <span className="profile-role">管理員</span>}</div>
+            <button className="logout" onClick={async () => { await supabase?.auth.signOut(); setUser(null); setProfile(null); setAttendance(null); setTab("attendance"); }}>登出</button>
           </div>
         )}
+
+        {tab === "admin" && isAdmin && <AdminPanel />}
       </section>
 
-      <nav className="bottom-nav" aria-label="主要選單">
+      <nav className={isAdmin ? "bottom-nav admin-nav" : "bottom-nav"} aria-label="主要選單">
         <NavButton active={tab === "attendance"} label="打卡" icon="◉" onClick={() => setTab("attendance")} />
         <NavButton active={tab === "announcements"} label="公告" icon="▤" onClick={() => setTab("announcements")} />
         <NavButton active={tab === "profile"} label="我的" icon="●" onClick={() => setTab("profile")} />
+        {isAdmin && <NavButton active={tab === "admin"} label="管理" icon="⌘" onClick={() => setTab("admin")} />}
       </nav>
     </main>
   );
